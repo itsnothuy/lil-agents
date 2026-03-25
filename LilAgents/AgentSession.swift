@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Provider
 
 enum AgentProvider: String, CaseIterable {
-    case claude, codex, copilot
+    case claude, codex, copilot, openclaw
 
     private static let defaultsKey = "selectedProvider"
 
@@ -19,9 +19,10 @@ enum AgentProvider: String, CaseIterable {
 
     var displayName: String {
         switch self {
-        case .claude:  return "Claude"
-        case .codex:   return "Codex"
-        case .copilot: return "Copilot"
+        case .claude:   return "Claude"
+        case .codex:    return "Codex"
+        case .copilot:  return "Copilot"
+        case .openclaw: return "OpenClaw"
         }
     }
 
@@ -46,14 +47,17 @@ enum AgentProvider: String, CaseIterable {
             return "To install, run this in Terminal:\n  npm install -g @openai/codex"
         case .copilot:
             return "To install, run this in Terminal:\n  brew install copilot-cli\n\nOr: npm install -g @github/copilot-cli"
+        case .openclaw:
+            return "OpenClaw is a self-hosted AI gateway.\n\nInstall: npm install -g openclaw\nStart:   openclaw gateway run\n\nDocs: https://docs.openclaw.ai"
         }
     }
 
     func createSession() -> any AgentSession {
         switch self {
-        case .claude:  return ClaudeSession()
-        case .codex:   return CodexSession()
-        case .copilot: return CopilotSession()
+        case .claude:   return ClaudeSession()
+        case .codex:    return CodexSession()
+        case .copilot:  return CopilotSession()
+        case .openclaw: return OpenClawSession()
         }
     }
 }
