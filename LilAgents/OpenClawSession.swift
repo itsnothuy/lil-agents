@@ -124,6 +124,7 @@ class OpenClawSession: AgentSession {
     private var nextRequestId = 0
     private let config = OpenClawConfig.load()
     private let device = DeviceIdentity.loadOrCreate()
+    private lazy var sessionKey = "\(config.sessionKeyPrefix):\(UUID().uuidString.lowercased())"
 
     private(set) var isRunning = false
     private(set) var isBusy = false
@@ -159,7 +160,7 @@ class OpenClawSession: AgentSession {
         history.append(AgentMessage(role: .user, text: message))
 
         var params: [String: Any] = [
-            "sessionKey": "\(config.sessionKeyPrefix):default",
+            "sessionKey": sessionKey,
             "message": message,
             "idempotencyKey": UUID().uuidString
         ]
