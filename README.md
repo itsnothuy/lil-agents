@@ -24,7 +24,8 @@ Supports **Claude Code**, **OpenAI Codex**, **GitHub Copilot**, and **Google Gem
 
 ## requirements
 
-- macOS Sonoma (14.0+)
+- macOS Sonoma (14.0+) — including Sequoia (15.x)
+- **Universal binary** — runs natively on both Apple Silicon and Intel Macs
 - At least one supported CLI installed:
   - [Claude Code](https://claude.ai/download)
   - [OpenAI Codex](https://github.com/openai/codex) — `npm install -g @openai/codex`
