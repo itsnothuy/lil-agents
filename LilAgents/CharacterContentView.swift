@@ -5,6 +5,37 @@ class KeyableWindow: NSWindow {
     override var canBecomeMain: Bool { true }
 }
 
+// MARK: - Pixel-accurate hit testing
+
+/// Captures a 1×1 pixel from the composited window image at the given CG-coordinate point.
+///
+/// `CGWindowListCreateImage` is deprecated in macOS 14 in favour of `ScreenCaptureKit`.
+/// However, `SCScreenshotManager` is async-only and cannot be used inside the synchronous
+/// `hitTest(_:)` override below. We isolate the deprecated call in this helper so the
+/// deprecation warning is suppressed in exactly one place and is easy to replace when
+/// Apple provides a synchronous SCK capture path.
+@available(macOS, deprecated: 14.0, message: "Replace with ScreenCaptureKit when a sync API is available.")
+private func sampleWindowAlpha(windowID: CGWindowID, at cgPoint: CGPoint) -> UInt8 {
+    let captureRect = CGRect(x: cgPoint.x - 0.5, y: cgPoint.y - 0.5, width: 1, height: 1)
+    guard let image = CGWindowListCreateImage(
+        captureRect,
+        .optionIncludingWindow,
+        windowID,
+        [.boundsIgnoreFraming, .bestResolution]
+    ) else { return 0 }
+
+    var pixel: [UInt8] = [0, 0, 0, 0]
+    guard let ctx = CGContext(
+        data: &pixel, width: 1, height: 1,
+        bitsPerComponent: 8, bytesPerRow: 4,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ) else { return 0 }
+
+    ctx.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+    return pixel[3]
+}
+
 class CharacterContentView: NSView {
     weak var character: WalkerCharacter?
 
@@ -12,39 +43,15 @@ class CharacterContentView: NSView {
         let localPoint = convert(point, from: superview)
         guard bounds.contains(localPoint) else { return nil }
 
-        // AVPlayerLayer is GPU-rendered so layer.render(in:) won't capture video pixels.
-        // Use CGWindowListCreateImage to sample actual on-screen alpha at click point.
         let screenPoint = window?.convertPoint(toScreen: convert(localPoint, to: nil)) ?? .zero
-        // Use the full virtual display height for the CG coordinate flip, not just
-        // the main screen. NSScreen coordinates have origin at bottom-left of the
-        // primary display, while CG uses top-left. The primary screen's height is
-        // the correct basis for the flip across all monitors.
+        // NSScreen origin is bottom-left of the primary display; CG origin is top-left.
+        // Use the primary screen height as the flip basis so multi-monitor positions are correct.
         guard let primaryScreen = NSScreen.screens.first else { return nil }
-        let flippedY = primaryScreen.frame.height - screenPoint.y
+        let cgPoint = CGPoint(x: screenPoint.x, y: primaryScreen.frame.height - screenPoint.y)
 
-        let captureRect = CGRect(x: screenPoint.x - 0.5, y: flippedY - 0.5, width: 1, height: 1)
-        guard let windowID = window?.windowNumber, windowID > 0 else { return nil }
-
-        if let image = CGWindowListCreateImage(
-            captureRect,
-            .optionIncludingWindow,
-            CGWindowID(windowID),
-            [.boundsIgnoreFraming, .bestResolution]
-        ) {
-            let colorSpace = CGColorSpaceCreateDeviceRGB()
-            var pixel: [UInt8] = [0, 0, 0, 0]
-            if let ctx = CGContext(
-                data: &pixel, width: 1, height: 1,
-                bitsPerComponent: 8, bytesPerRow: 4,
-                space: colorSpace,
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-            ) {
-                ctx.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
-                if pixel[3] > 30 {
-                    return self
-                }
-                return nil
-            }
+        if let windowID = window?.windowNumber, windowID > 0 {
+            let alpha = sampleWindowAlpha(windowID: CGWindowID(windowID), at: cgPoint)
+            return alpha > 30 ? self : nil
         }
 
         // Fallback: accept click if within center 60% of the view
@@ -54,7 +61,52 @@ class CharacterContentView: NSView {
         return hitRect.contains(localPoint) ? self : nil
     }
 
+    // MARK: - Drag-to-reposition support
+
+    private var dragStartPoint: NSPoint?
+    private var windowStartOrigin: NSPoint?
+    private var isDragging = false
+    private static let dragThreshold: CGFloat = 5
+
     override func mouseDown(with event: NSEvent) {
-        character?.handleClick()
+        guard WalkerCharacter.dragEnabled else {
+            character?.handleClick()
+            return
+        }
+        dragStartPoint = NSEvent.mouseLocation
+        windowStartOrigin = window?.frame.origin
+        isDragging = false
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard WalkerCharacter.dragEnabled,
+              let startPoint = dragStartPoint,
+              let startOrigin = windowStartOrigin else { return }
+        let current = NSEvent.mouseLocation
+        let dx = current.x - startPoint.x
+        let dy = current.y - startPoint.y
+
+        if !isDragging && (abs(dx) > Self.dragThreshold || abs(dy) > Self.dragThreshold) {
+            isDragging = true
+            character?.startDrag()
+        }
+
+        if isDragging {
+            window?.setFrameOrigin(NSPoint(x: startOrigin.x + dx, y: startOrigin.y + dy))
+            character?.trackDragVelocity()
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard WalkerCharacter.dragEnabled else { return }
+        if !isDragging {
+            character?.handleClick()
+        } else {
+            character?.endDrag()
+        }
+        isDragging = false
+        dragStartPoint = nil
+        windowStartOrigin = nil
     }
 }
+

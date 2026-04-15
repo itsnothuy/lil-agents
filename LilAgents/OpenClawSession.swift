@@ -412,7 +412,7 @@ class OpenClawSession: AgentSession {
         alert.accessoryView = container
 
         if alert.runModal() == .alertFirstButtonReturn {
-            var c = OpenClawConfig(
+            let c = OpenClawConfig(
                 gatewayURL: urlField.stringValue.isEmpty ? "ws://localhost:3001" : urlField.stringValue,
                 authToken: tokenField.stringValue,
                 sessionKeyPrefix: prefixField.stringValue.isEmpty ? "lil-agents" : prefixField.stringValue,

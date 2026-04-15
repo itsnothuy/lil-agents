@@ -103,7 +103,16 @@ class LilAgentsController {
 
     private func getDockIconArea(screenWidth: CGFloat) -> (x: CGFloat, width: CGFloat) {
         let dockDefaults = UserDefaults(suiteName: "com.apple.dock")
-        let tileSize = CGFloat(dockDefaults?.double(forKey: "tilesize") ?? 48)
+        // Use object(forKey:) instead of double(forKey:) / bool(forKey:) because
+        // the typed accessors return 0 / false for missing keys. Through the
+        // optional chain these become Optional(0) / Optional(false) — never nil —
+        // so the ?? fallback never fires.  object(forKey:) returns nil correctly.
+        let tileSize: CGFloat = {
+            if let val = dockDefaults?.object(forKey: "tilesize") as? Double, val > 0 {
+                return CGFloat(val)
+            }
+            return 48
+        }()
         let slotWidth = tileSize * 1.25
 
         var persistentApps = dockDefaults?.array(forKey: "persistent-apps")?.count ?? 0
@@ -115,7 +124,12 @@ class LilAgentsController {
             persistentOthers = 3
         }
 
-        let showRecents = dockDefaults?.bool(forKey: "show-recents") ?? true
+        let showRecents: Bool = {
+            if let val = dockDefaults?.object(forKey: "show-recents") as? Bool {
+                return val
+            }
+            return true  // macOS default: show recents
+        }()
         let recentApps = showRecents ? (dockDefaults?.array(forKey: "recent-apps")?.count ?? 0) : 0
         let totalIcons = persistentApps + persistentOthers + recentApps
 
@@ -135,7 +149,7 @@ class LilAgentsController {
 
     private func dockAutohideEnabled() -> Bool {
         let dockDefaults = UserDefaults(suiteName: "com.apple.dock")
-        return dockDefaults?.bool(forKey: "autohide") ?? false
+        return dockDefaults?.object(forKey: "autohide") as? Bool ?? false
     }
 
     // MARK: - Display Link
@@ -230,14 +244,6 @@ class LilAgentsController {
 
         let activeChars = characters.filter { $0.window.isVisible && $0.isManuallyVisible }
 
-        let now = CACurrentMediaTime()
-        let anyWalking = activeChars.contains { $0.isWalking }
-        for char in activeChars {
-            if char.isIdleForPopover { continue }
-            if char.isPaused && now >= char.pauseEndTime && anyWalking {
-                char.pauseEndTime = now + Double.random(in: 5.0...10.0)
-            }
-        }
         for char in activeChars {
             char.update(dockX: dockX, dockWidth: dockWidth, dockTopY: dockTopY)
         }

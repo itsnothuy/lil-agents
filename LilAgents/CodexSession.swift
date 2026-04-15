@@ -22,7 +22,7 @@ class CodexSession: AgentSession {
     // MARK: - Lifecycle
 
     func start() {
-        if let cached = Self.binaryPath {
+        if Self.binaryPath != nil {
             isRunning = true
             onSessionReady?()
             return

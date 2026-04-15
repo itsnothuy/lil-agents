@@ -373,7 +373,6 @@ class TerminalView: NSView {
         let result = NSMutableAttributedString()
         let lines = text.components(separatedBy: "\n")
         var inCodeBlock = false
-        var codeBlockLang = ""
         var codeLines: [String] = []
 
         for (i, line) in lines.enumerated() {
@@ -390,7 +389,8 @@ class TerminalView: NSView {
                     codeLines = []
                 } else {
                     inCodeBlock = true
-                    codeBlockLang = String(line.dropFirst(3))
+                    // Language tag (e.g. "swift", "python") reserved for future syntax highlighting.
+                    _ = String(line.dropFirst(3))
                 }
                 continue
             }

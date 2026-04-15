@@ -149,7 +149,7 @@ class WalkerCharacter {
         let y = dockTopY - bottomPadding + yOffset
 
         let contentRect = CGRect(x: 0, y: y, width: displayWidth, height: displayHeight)
-        window = NSWindow(
+        window = KeyableWindow(
             contentRect: contentRect,
             styleMask: .borderless,
             backing: .buffered,
@@ -230,6 +230,70 @@ class WalkerCharacter {
         if wasBubbleVisibleBeforeEnvironmentHide {
             updateThinkingBubble()
         }
+    }
+
+    // MARK: - Drag & Fling Support
+
+    /// Master toggle — set to `false` to completely disable drag-to-reposition.
+    static var dragEnabled = true
+
+    var isBeingDragged = false
+    private var isSliding = false
+    private var slideVelocity: CGFloat = 0
+    private var dragVelocityX: CGFloat = 0
+    private var lastDragX: CGFloat = 0
+    private var lastDragTime: CFTimeInterval = 0
+    /// Dock geometry cached each tick for post-drag position sync.
+    private var lastDockX: CGFloat = 0
+    private var lastDockTopY: CGFloat = 0
+
+    func startDrag() {
+        isBeingDragged = true
+        isSliding = false
+        isWalking = false
+        isPaused = true
+        queuePlayer.pause()
+        lastDragX = NSEvent.mouseLocation.x
+        lastDragTime = CACurrentMediaTime()
+        dragVelocityX = 0
+    }
+
+    func trackDragVelocity() {
+        let now = CACurrentMediaTime()
+        let currentX = NSEvent.mouseLocation.x
+        let dt = now - lastDragTime
+        if dt > 0.001 {
+            // Exponential smoothing to reduce velocity noise
+            let instantVelocity = (currentX - lastDragX) / CGFloat(dt)
+            dragVelocityX = dragVelocityX * 0.6 + instantVelocity * 0.4
+        }
+        lastDragX = currentX
+        lastDragTime = now
+    }
+
+    func endDrag() {
+        isBeingDragged = false
+        let clampedVelocity = max(-2000, min(2000, dragVelocityX))
+        if abs(clampedVelocity) > 50 {
+            isSliding = true
+            slideVelocity = clampedVelocity
+        } else {
+            isSliding = false
+            syncPositionFromWindow()
+            pauseEndTime = CACurrentMediaTime() + 2.0
+        }
+    }
+
+    /// After drag/fling, convert the window's screen position back into the
+    /// normalised `positionProgress` so walking resumes from the new spot.
+    private func syncPositionFromWindow() {
+        guard currentTravelDistance > 0 else { return }
+        let rawProgress = (window.frame.origin.x - lastDockX - currentFlipCompensation) / currentTravelDistance
+        positionProgress = max(0, min(1, rawProgress))
+        walkStartPixel = currentTravelDistance * positionProgress
+        walkEndPixel = walkStartPixel
+        walkStartPos = positionProgress
+        walkEndPos = positionProgress
     }
 
     // MARK: - Click Handling & Popover
@@ -849,6 +913,17 @@ class WalkerCharacter {
     // MARK: - Walking
 
     func startWalk() {
+        // Don't start if a sibling is already mid-walk — stagger characters naturally.
+        // We defer by a short random interval rather than mutating pauseEndTime from the
+        // outside, keeping all walk-scheduling logic inside WalkerCharacter.
+        if let siblings = controller?.characters {
+            let siblingWalking = siblings.contains { $0 !== self && $0.isWalking }
+            if siblingWalking {
+                pauseEndTime = CACurrentMediaTime() + Double.random(in: 1.5...4.0)
+                return
+            }
+        }
+
         isPaused = false
         isWalking = true
         playCount = 0
@@ -889,6 +964,9 @@ class WalkerCharacter {
                 }
             }
         }
+
+        // Recompute pixel endpoint after separation clamp may have changed walkEndPos
+        walkEndPixel = walkEndPos * currentTravelDistance
 
         updateFlip()
         queuePlayer.seek(to: .zero)
@@ -949,6 +1027,34 @@ class WalkerCharacter {
 
     func update(dockX: CGFloat, dockWidth: CGFloat, dockTopY: CGFloat) {
         currentTravelDistance = max(dockWidth - displayWidth, 0)
+        lastDockX = dockX
+        lastDockTopY = dockTopY
+
+        // --- Drag: don't override window position while user is dragging ---
+        if isBeingDragged { return }
+
+        // --- Fling slide: physics tick after drag release ---
+        if isSliding {
+            let friction: CGFloat = 0.92
+            slideVelocity *= friction
+            let dx = slideVelocity * (1.0 / 60.0)
+            var newX = window.frame.origin.x + dx
+            // Bounce off dock travel bounds (not full screen width)
+            let minX = dockX
+            let maxX = dockX + currentTravelDistance
+            if newX < minX { newX = minX; slideVelocity = -slideVelocity * 0.5 }
+            if newX > maxX { newX = maxX; slideVelocity = -slideVelocity * 0.5 }
+            let bottomPadding = displayHeight * 0.15
+            let y = dockTopY - bottomPadding + yOffset
+            window.setFrameOrigin(NSPoint(x: newX, y: y))
+            if abs(slideVelocity) < 10 {
+                isSliding = false
+                syncPositionFromWindow()
+                pauseEndTime = CACurrentMediaTime() + 2.0
+            }
+            return
+        }
+
         if isIdleForPopover {
             let travelDistance = currentTravelDistance
             let x = dockX + travelDistance * positionProgress + currentFlipCompensation
@@ -965,7 +1071,11 @@ class WalkerCharacter {
         if isPaused {
             if now >= pauseEndTime {
                 startWalk()
-            } else {
+            }
+            // startWalk() may have returned early (sibling walking) leaving isPaused=true.
+            // In either case, if we are still paused after the call, position the window
+            // and return — do not fall through into the isWalking block.
+            if isPaused {
                 let travelDistance = max(dockWidth - displayWidth, 0)
                 let x = dockX + travelDistance * positionProgress + currentFlipCompensation
                 let bottomPadding = displayHeight * 0.15
@@ -988,6 +1098,8 @@ class WalkerCharacter {
             if travelDistance > 0 {
                 positionProgress = min(max(currentPixel / travelDistance, 0), 1)
             }
+
+
 
             if elapsed >= videoDuration {
                 walkEndPos = positionProgress

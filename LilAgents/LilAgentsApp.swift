@@ -11,10 +11,10 @@ struct LilAgentsApp: App {
     }
 }
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, SPUStandardUserDriverDelegate {
     var controller: LilAgentsController?
     var statusItem: NSStatusItem?
-    let updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+    lazy var updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: self)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -25,6 +25,50 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         controller?.characters.forEach { $0.session?.terminate() }
+    }
+
+    // MARK: - Sparkle User Driver Delegate
+
+    /// Tells Sparkle that this background app uses the menu bar button as a
+    /// gentle reminder surface. When an update is found, Sparkle will badge
+    /// or annotate the status item so the user notices even though there is
+    /// no dock icon or modal window to draw attention.
+    var supportsGentleScheduledUpdateReminders: Bool { true }
+
+    func standardUserDriverShouldHandleShowingScheduledUpdate(
+        _ update: SUAppcastItem,
+        andInImmediateFocus immediateFocus: Bool
+    ) -> Bool {
+        // Let Sparkle show its standard update UI; we handle the reminder
+        // ourselves via the menu bar badge below.
+        return true
+    }
+
+    func standardUserDriverWillHandleShowingUpdate(
+        _ handleShowingUpdate: Bool,
+        forUpdate update: SUAppcastItem,
+        state: SPUUserUpdateState
+    ) {
+        // Badge the menu bar icon so the user notices the pending update.
+        if let button = statusItem?.button {
+            if !handleShowingUpdate && !state.userInitiated {
+                button.appearsDisabled = false
+                if #available(macOS 11.0, *) {
+                    button.image = NSImage(
+                        systemSymbolName: "figure.walk.circle.fill",
+                        accessibilityDescription: "Update available"
+                    )
+                }
+            }
+        }
+    }
+
+    func standardUserDriverDidReceiveUserAttention(forUpdate update: SUAppcastItem) {
+        // Restore the normal menu bar icon once the user has seen the update UI.
+        if let button = statusItem?.button {
+            button.image = NSImage(named: "MenuBarIcon") ??
+                NSImage(systemSymbolName: "figure.walk", accessibilityDescription: "lil agents")
+        }
     }
 
     // MARK: - Menu Bar
